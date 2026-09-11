@@ -65,35 +65,6 @@ Decryption pipeline:
    (`payload_type: "bip39-entropy"`) containing base64 BIP39 entropy, which the
    tool converts to the seed phrase (SHA-256 checksum, English wordlist). If the
    plaintext isn't that payload, it's displayed as-is with a warning.
-
-## Repository layout
-
-| File | Role |
-|---|---|
-| `template.html` | Page markup and styles |
-| `core.js` | Crypto/validation core — no DOM, no network. Shared by the page and the tests |
-| `page.js` | UI logic (DOM and flow only) |
-| `build.js` | Inlines the vendored libs, wordlist, core, and UI into the single HTML file |
-| `gen-vectors.js` | Generates the test fixtures |
-| `test.js` | Headless acceptance suite (runs the exact inlined scripts in Node) |
-| `browser-test.js` | End-to-end suite in real Chromium via `file://` (Playwright) |
-| `fixtures/` | Reference backups with known password + mnemonic |
-
-## Building and testing
-
-```sh
-npm install
-node build.js          # -> tetrapolar-key-recovery.html
-node gen-vectors.js    # -> fixtures/
-node test.js           # headless acceptance suite
-node browser-test.js   # full browser E2E (needs Chromium; real-backup case via
-                       # REAL_TPKEY_PATH / REAL_TPKEY_PASSWORD env vars)
-```
-
-The acceptance suite covers both ciphers, both file shapes, KDF parameters across
-the allowed range (64→256 MiB, 2→10 iterations), wrong-password and
-corrupted-ciphertext errors, AAD tampering, and the full validation matrix.
-Test vectors are generated with an independent crypto stack (hash-wasm) and
 decrypted with the page's vendored stack, so a convention mismatch fails loudly.
 
 ## License
