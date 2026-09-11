@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data:;">
+<meta http-equiv="Cache-Control" content="no-store">
+<title>Tetrapolar Key Recovery</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; justify-content: center;
+    padding: 24px 16px; background: #0d1117; color: #e6edf3;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 15px; line-height: 1.5;
+  }
+  main { width: 100%; max-width: 560px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #8b949e; margin: 0 0 20px; font-size: 13px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  #dropzone {
+    border: 2px dashed #30363d; border-radius: 10px; padding: 32px 16px;
+    text-align: center; cursor: pointer; color: #8b949e; transition: border-color .15s;
+  }
+  #dropzone:hover, #dropzone.drag { border-color: #58a6ff; color: #c9d1d9; }
+  #dropzone strong { color: #58a6ff; }
+  .meta { font-size: 13px; color: #8b949e; margin-top: 12px; }
+  .meta b { color: #c9d1d9; font-weight: 600; }
+  label { display: block; font-size: 13px; color: #8b949e; margin-bottom: 6px; }
+  input[type=password], input[type=text] {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #30363d;
+    background: #0d1117; color: #e6edf3; font: inherit;
+  }
+  input:focus { outline: none; border-color: #58a6ff; }
+  .pw-row { display: flex; gap: 8px; }
+  .pw-row input { flex: 1; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid #30363d;
+    background: #21262d; color: #c9d1d9; padding: 10px 16px;
+  }
+  button:hover:not(:disabled) { border-color: #8b949e; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; width: 100%; }
+  button.primary:hover:not(:disabled) { background: #388bfd; border-color: #388bfd; }
+  button.danger { width: 100%; }
+  .error { background: #3d1d1d; border: 1px solid #6e3535; color: #ffb3b3; border-radius: 8px; padding: 12px 14px; margin-top: 12px; font-size: 14px; }
+  .warn { background: #3d3419; border: 1px solid #6e5c1e; color: #f0d48a; border-radius: 8px; padding: 12px 14px; margin-top: 12px; font-size: 13px; }
+  .ok { color: #3fb950; font-weight: 600; }
+  .progress { color: #58a6ff; margin-top: 12px; font-size: 14px; }
+  .hidden { display: none !important; }
+  .seed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin: 14px 0; }
+  .seed-grid span { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 6px 10px; font-size: 14px; }
+  .seed-grid i { color: #484f58; font-style: normal; margin-right: 8px; font-size: 12px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; }
+  .btn-row button { flex: 1; }
+  #banner { background: #1c2733; border: 1px solid #2d4a63; border-radius: 8px; padding: 12px 14px; font-size: 13px; color: #a5d6ff; margin-bottom: 16px; display: flex; gap: 12px; align-items: start; }
+  #banner button { padding: 2px 10px; flex: none; }
+  .footer { color: #484f58; font-size: 12px; text-align: center; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tetrapolar Key Recovery</h1>
+  <p class="sub">Offline Simple Key backup recovery. Nothing leaves this page.</p>
+
+  <div id="banner">
+    <div>For maximum safety, use this tool on a computer that is offline. Disconnect from the internet before entering your password. Delete this file when you are done.</div>
+    <button id="banner-close" title="Dismiss">✕</button>
+  </div>
+
+  <div class="card" id="step-file">
+    <div id="dropzone">
+      Drop your backup file here, or <strong>browse</strong><br>
+      <span style="font-size:12px">.tpkey or .json</span>
+    </div>
+    <input type="file" id="file-input" accept=".tpkey,.json,application/json" class="hidden">
+    <div id="file-meta" class="meta hidden"></div>
+    <div id="file-error" class="error hidden"></div>
+  </div>
+
+  <div class="card" id="step-password">
+    <label for="password">Recovery password</label>
+    <div class="pw-row">
+      <input type="password" id="password" autocomplete="off" spellcheck="false" disabled placeholder="Enter your recovery password">
+      <button id="toggle-pw" type="button" disabled>Show</button>
+    </div>
+    <div style="height:12px"></div>
+    <button id="decrypt" class="primary" disabled>Decrypt</button>
+    <div id="progress" class="progress hidden">Deriving key… this can take 10–30 seconds.</div>
+    <div id="decrypt-error" class="error hidden"></div>
+  </div>
+
+  <div class="card hidden" id="step-result">
+    <div id="result-ok"><span class="ok">✓ Decryption successful.</span> Your seed phrase is ready.</div>
+    <div id="word-warning" class="warn hidden"></div>
+    <div class="btn-row" id="reveal-row">
+      <button id="reveal" class="primary">Reveal seed phrase</button>
+    </div>
+    <div id="seed-area" class="hidden">
+      <div class="seed-grid" id="seed-grid"></div>
+      <div class="btn-row">
+        <button id="copy">Copy</button>
+      </div>
+    </div>
+    <div style="height:12px"></div>
+    <button id="clear" class="danger">Clear and start over</button>
+  </div>
+
+  <p class="footer">Runs entirely offline · no network, no storage, no telemetry</p>
+</main>
+
+<script>!function(A,I){"object"==typeof exports&&"object"==typeof module?module.exports=I():"function"==typeof define&&define.amd?define([],I):"object"==typeof exports?exports.argon2=I():A.argon2=I()}(this,(function(){return(()=>{var A,I,g={773:(A,I,g)=>{var B,Q="undefined"!=typeof self&&void 0!==self.Module?self.Module:{},C={};for(B in Q)Q.hasOwnProperty(B)&&(C[B]=Q[B]);var E,i,o,D,e=[];E="object"==typeof window,i="function"==typeof importScripts,o="object"==typeof process&&"object"==typeof process.versions&&"string"==typeof process.versions.node,D=!E&&!o&&!i;var n,t,a,r,s,y="";o?(y=i?g(967).dirname(y)+"/":"//",n=function(A,I){return r||(r=g(145)),s||(s=g(967)),A=s.normalize(A),r.readFileSync(A,I?null:"utf8")},a=function(A){var I=n(A,!0);return I.buffer||(I=new Uint8Array(I)),G(I.buffer),I},process.argv.length>1&&process.argv[1].replace(/\\/g,"/"),e=process.argv.slice(2),A.exports=Q,process.on("uncaughtException",(function(A){if(!(A instanceof V))throw A})),process.on("unhandledRejection",u),Q.inspect=function(){return"[Emscripten Module object]"}):D?("undefined"!=typeof read&&(n=function(A){return read(A)}),a=function(A){var I;return"function"==typeof readbuffer?new Uint8Array(readbuffer(A)):(G("object"==typeof(I=read(A,"binary"))),I)},"undefined"!=typeof scriptArgs?e=scriptArgs:void 0!==arguments&&(e=arguments),"undefined"!=typeof print&&("undefined"==typeof console&&(console={}),console.log=print,console.warn=console.error="undefined"!=typeof printErr?printErr:print)):(E||i)&&(i?y=self.location.href:"undefined"!=typeof document&&document.currentScript&&(y=document.currentScript.src),y=0!==y.indexOf("blob:")?y.substr(0,y.lastIndexOf("/")+1):"",n=function(A){var I=new XMLHttpRequest;return I.open("GET",A,!1),I.send(null),I.responseText},i&&(a=function(A){var I=new XMLHttpRequest;return I.open("GET",A,!1),I.responseType="arraybuffer",I.send(null),new Uint8Array(I.response)}),t=function(A,I,g){var B=new XMLHttpRequest;B.open("GET",A,!0),B.responseType="arraybuffer",B.onload=function(){200==B.status||0==B.status&&B.response?I(B.response):g()},B.onerror=g,B.send(null)}),Q.print||console.log.bind(console);var F,c,w=Q.printErr||console.warn.bind(console);for(B in C)C.hasOwnProperty(B)&&(Q[B]=C[B]);C=null,Q.arguments&&(e=Q.arguments),Q.thisProgram&&Q.thisProgram,Q.quit&&Q.quit,Q.wasmBinary&&(F=Q.wasmBinary),Q.noExitRuntime,"object"!=typeof WebAssembly&&u("no native wasm support detected");var h=!1;function G(A,I){A||u("Assertion failed: "+I)}var N,R,f="undefined"!=typeof TextDecoder?new TextDecoder("utf8"):void 0;function U(A){N=A,Q.HEAP8=new Int8Array(A),Q.HEAP16=new Int16Array(A),Q.HEAP32=new Int32Array(A),Q.HEAPU8=R=new Uint8Array(A),Q.HEAPU16=new Uint16Array(A),Q.HEAPU32=new Uint32Array(A),Q.HEAPF32=new Float32Array(A),Q.HEAPF64=new Float64Array(A)}Q.INITIAL_MEMORY;var M,Y=[],S=[],H=[],d=0,k=null,J=null;function u(A){throw Q.onAbort&&Q.onAbort(A),w(A+=""),h=!0,A="abort("+A+"). Build with -s ASSERTIONS=1 for more info.",new WebAssembly.RuntimeError(A)}function p(A){return A.startsWith("data:application/octet-stream;base64,")}function L(A){return A.startsWith("file://")}Q.preloadedImages={},Q.preloadedAudios={};var l,K="argon2.wasm";function q(A){try{if(A==K&&F)return new Uint8Array(F);if(a)return a(A);throw"both async and sync fetching of the wasm failed"}catch(A){u(A)}}function b(A){for(;A.length>0;){var I=A.shift();if("function"!=typeof I){var g=I.func;"number"==typeof g?void 0===I.arg?M.get(g)():M.get(g)(I.arg):g(void 0===I.arg?null:I.arg)}else I(Q)}}function x(A){try{return c.grow(A-N.byteLength+65535>>>16),U(c.buffer),1}catch(A){}}p(K)||(l=K,K=Q.locateFile?Q.locateFile(l,y):y+l);var m,X={a:function(A,I,g){R.copyWithin(A,I,I+g)},b:function(A){var I,g=R.length,B=2147418112;if((A>>>=0)>B)return!1;for(var Q=1;Q<=4;Q*=2){var C=g*(1+.2/Q);if(C=Math.min(C,A+100663296),x(Math.min(B,((I=Math.max(A,C))%65536>0&&(I+=65536-I%65536),I))))return!0}return!1}},W=(function(){var A={a:X};function I(A,I){var g,B=A.exports;Q.asm=B,U((c=Q.asm.c).buffer),M=Q.asm.k,g=Q.asm.d,S.unshift(g),function(A){if(d--,Q.monitorRunDependencies&&Q.monitorRunDependencies(d),0==d&&(null!==k&&(clearInterval(k),k=null),J)){var I=J;J=null,I()}}()}function g(A){I(A.instance)}function B(I){return function(){if(!F&&(E||i)){if("function"==typeof fetch&&!L(K))return fetch(K,{credentials:"same-origin"}).then((function(A){if(!A.ok)throw"failed to load wasm binary file at '"+K+"'";return A.arrayBuffer()})).catch((function(){return q(K)}));if(t)return new Promise((function(A,I){t(K,(function(I){A(new Uint8Array(I))}),I)}))}return Promise.resolve().then((function(){return q(K)}))}().then((function(I){return WebAssembly.instantiate(I,A)})).then(I,(function(A){w("failed to asynchronously prepare wasm: "+A),u(A)}))}if(d++,Q.monitorRunDependencies&&Q.monitorRunDependencies(d),Q.instantiateWasm)try{return Q.instantiateWasm(A,I)}catch(A){return w("Module.instantiateWasm callback failed with error: "+A),!1}F||"function"!=typeof WebAssembly.instantiateStreaming||p(K)||L(K)||"function"!=typeof fetch?B(g):fetch(K,{credentials:"same-origin"}).then((function(I){return WebAssembly.instantiateStreaming(I,A).then(g,(function(A){return w("wasm streaming compile failed: "+A),w("falling back to ArrayBuffer instantiation"),B(g)}))}))}(),Q.___wasm_call_ctors=function(){return(Q.___wasm_call_ctors=Q.asm.d).apply(null,arguments)},Q._argon2_hash=function(){return(Q._argon2_hash=Q.asm.e).apply(null,arguments)},Q._malloc=function(){return(W=Q._malloc=Q.asm.f).apply(null,arguments)}),T=(Q._free=function(){return(Q._free=Q.asm.g).apply(null,arguments)},Q._argon2_verify=function(){return(Q._argon2_verify=Q.asm.h).apply(null,arguments)},Q._argon2_error_message=function(){return(Q._argon2_error_message=Q.asm.i).apply(null,arguments)},Q._argon2_encodedlen=function(){return(Q._argon2_encodedlen=Q.asm.j).apply(null,arguments)},Q._argon2_hash_ext=function(){return(Q._argon2_hash_ext=Q.asm.l).apply(null,arguments)},Q._argon2_verify_ext=function(){return(Q._argon2_verify_ext=Q.asm.m).apply(null,arguments)},Q.stackAlloc=function(){return(T=Q.stackAlloc=Q.asm.n).apply(null,arguments)});function V(A){this.name="ExitStatus",this.message="Program terminated with exit("+A+")",this.status=A}function j(A){function I(){m||(m=!0,Q.calledRun=!0,h||(b(S),Q.onRuntimeInitialized&&Q.onRuntimeInitialized(),function(){if(Q.postRun)for("function"==typeof Q.postRun&&(Q.postRun=[Q.postRun]);Q.postRun.length;)A=Q.postRun.shift(),H.unshift(A);var A;b(H)}()))}A=A||e,d>0||(function(){if(Q.preRun)for("function"==typeof Q.preRun&&(Q.preRun=[Q.preRun]);Q.preRun.length;)A=Q.preRun.shift(),Y.unshift(A);var A;b(Y)}(),d>0||(Q.setStatus?(Q.setStatus("Running..."),setTimeout((function(){setTimeout((function(){Q.setStatus("")}),1),I()}),1)):I()))}if(Q.allocate=function(A,I){var g;return g=1==I?T(A.length):W(A.length),A.subarray||A.slice?R.set(A,g):R.set(new Uint8Array(A),g),g},Q.UTF8ToString=function(A,I){return A?function(A,I,g){for(var B=I+g,Q=I;A[Q]&&!(Q>=B);)++Q;if(Q-I>16&&A.subarray&&f)return f.decode(A.subarray(I,Q));for(var C="";I<Q;){var E=A[I++];if(128&E){var i=63&A[I++];if(192!=(224&E)){var o=63&A[I++];if((E=224==(240&E)?(15&E)<<12|i<<6|o:(7&E)<<18|i<<12|o<<6|63&A[I++])<65536)C+=String.fromCharCode(E);else{var D=E-65536;C+=String.fromCharCode(55296|D>>10,56320|1023&D)}}else C+=String.fromCharCode((31&E)<<6|i)}else C+=String.fromCharCode(E)}return C}(R,A,I):""},Q.ALLOC_NORMAL=0,J=function A(){m||j(),m||(J=A)},Q.run=j,Q.preInit)for("function"==typeof Q.preInit&&(Q.preInit=[Q.preInit]);Q.preInit.length>0;)Q.preInit.pop()();j(),A.exports=Q,Q.unloadRuntime=function(){"undefined"!=typeof self&&delete self.Module,Q=c=M=N=R=void 0,delete A.exports}},631:function(A,I,g){var B,Q;"undefined"!=typeof self&&self,void 0===(Q="function"==typeof(B=function(){const A="undefined"!=typeof self?self:this,I={Argon2d:0,Argon2i:1,Argon2id:2};function B(I){if(B._promise)return B._promise;if(B._module)return Promise.resolve(B._module);let C;return C=A.process&&A.process.versions&&A.process.versions.node?Q().then((A=>new Promise((I=>{A.postRun=()=>I(A)})))):(A.loadArgon2WasmBinary?A.loadArgon2WasmBinary():Promise.resolve(g(721)).then((A=>function(A){const I=atob(A),g=new Uint8Array(new ArrayBuffer(I.length));for(let A=0;A<I.length;A++)g[A]=I.charCodeAt(A);return g}(A)))).then((g=>function(I,g){return new Promise((B=>(A.Module={wasmBinary:I,wasmMemory:g,postRun(){B(Module)}},Q())))}(g,I?function(A){const I=1024,g=64*I,B=(1024*I*1024*2-64*I)/g,Q=Math.min(Math.max(Math.ceil(A*I/g),256)+256,B);return new WebAssembly.Memory({initial:Q,maximum:B})}(I):void 0))),B._promise=C,C.then((A=>(B._module=A,delete B._promise,A)))}function Q(){return A.loadArgon2WasmModule?A.loadArgon2WasmModule():Promise.resolve(g(773))}function C(A,I){return A.allocate(I,"i8",A.ALLOC_NORMAL)}function E(A,I){return C(A,new Uint8Array([...I,0]))}function i(A){if("string"!=typeof A)return A;if("function"==typeof TextEncoder)return(new TextEncoder).encode(A);if("function"==typeof Buffer)return Buffer.from(A);throw new Error("Don't know how to encode UTF8")}return{ArgonType:I,hash:function(A){const g=A.mem||1024;return B(g).then((B=>{const Q=A.time||1,o=A.parallelism||1,D=i(A.pass),e=E(B,D),n=D.length,t=i(A.salt),a=E(B,t),r=t.length,s=A.type||I.Argon2d,y=B.allocate(new Array(A.hashLen||24),"i8",B.ALLOC_NORMAL),F=A.secret?C(B,A.secret):0,c=A.secret?A.secret.byteLength:0,w=A.ad?C(B,A.ad):0,h=A.ad?A.ad.byteLength:0,G=A.hashLen||24,N=B._argon2_encodedlen(Q,g,o,r,G,s),R=B.allocate(new Array(N+1),"i8",B.ALLOC_NORMAL);let f,U,M;try{U=B._argon2_hash_ext(Q,g,o,e,n,a,r,y,G,R,N,s,F,c,w,h,19)}catch(A){f=A}if(0!==U||f){try{f||(f=B.UTF8ToString(B._argon2_error_message(U)))}catch(A){}M={message:f,code:U}}else{let A="";const I=new Uint8Array(G);for(let g=0;g<G;g++){const Q=B.HEAP8[y+g];I[g]=Q,A+=("0"+(255&Q).toString(16)).slice(-2)}M={hash:I,hashHex:A,encoded:B.UTF8ToString(R)}}try{B._free(e),B._free(a),B._free(y),B._free(R),w&&B._free(w),F&&B._free(F)}catch(A){}if(f)throw M;return M}))},verify:function(A){return B().then((g=>{const B=i(A.pass),Q=E(g,B),o=B.length,D=A.secret?C(g,A.secret):0,e=A.secret?A.secret.byteLength:0,n=A.ad?C(g,A.ad):0,t=A.ad?A.ad.byteLength:0,a=E(g,i(A.encoded));let r,s,y,F=A.type;if(void 0===F){let g=A.encoded.split("$")[1];g&&(g=g.replace("a","A"),F=I[g]||I.Argon2d)}try{s=g._argon2_verify_ext(a,Q,o,D,e,n,t,F)}catch(A){r=A}if(s||r){try{r||(r=g.UTF8ToString(g._argon2_error_message(s)))}catch(A){}y={message:r,code:s}}try{g._free(Q),g._free(a)}catch(A){}if(r)throw y;return y}))},unloadRuntime:function(){B._module&&(B._module.unloadRuntime(),delete B._promise,delete B._module)}}})?B.apply(I,[]):B)||(A.exports=Q)},721:function(A,I){A.exports="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DwtBixEPC0GeEyEBCyABC48DAQF/IwBBgANrIgQkACAEQQA2AowBIARBjAFqIAEQBwJAIAFBwABNBEAgBEGQAWogARAYQQBIDQEgBEGQAWogBEGMAWpBBBAGQQBIDQEgBEGQAWogAiADEAZBAEgNASAEQZABaiAAIAEQEhoMAQsgBEGQAWpBwAAQGEEASA0AIARBkAFqIARBjAFqQQQQBkEASA0AIARBkAFqIAIgAxAGQQBIDQAgBEGQAWogBEFAa0HAABASQQBIDQAgACAEKQNANwAAIAAgBCkDSDcACCAAIAQpA1g3ABggACAEKQNQNwAQIABBIGohACABQSBrIgJBwQBPBEADQCAEIARBQGtBwAAQBSIBQUBrQcAAIAEQMUEASA0CIAAgASkDQDcAACAAIAEpA0g3AAggACAEKQNYNwAYIAAgBCkDUDcAECAAQSBqIQAgAkEgayICQcAASw0ACwsgBCAEQUBrQcAAEAUiAUFAayACIAEQMUEASA0AIAAgAUFAayACEAUaCyAEQZABakHwARAEIARBgANqJAALAwABC5kCACAARQRAQQAPCwJ/AkAgAAR/IAFB/wBNDQECQEGgHigCACgCAEUEQCABQYB/cUGAvwNGDQMMAQsgAUH/D00EQCAAIAFBP3FBgAFyOgABIAAgAUEGdkHAAXI6AABBAgwECyABQYCwA09BACABQYBAcUGAwANHG0UEQCAAIAFBP3FBgAFyOgACIAAgAUEMdkHgAXI6AAAgACABQQZ2QT9xQYABcjoAAUEDDAQLIAFBgIAEa0H//z9NBEAgACABQT9xQYABcjoAAyAAIAFBEnZB8AFyOgAAIAAgAUEGdkE/cUGAAXI6AAIgACABQQx2QT9xQYABcjoAAUEEDAQLC0HcHkEZNgIAQX8FQQELDAELIAAgAToAAEEBCwtQAQN/AkAgACgCACwAABAPRQRADAELA0AgACgCACICLAAAIQMgACACQQFqNgIAIAEgA2pBMGshASACLAABEA9FDQEgAUEKbCEBDAALAAsgAQu7AgACQCABQRRLDQACQAJAAkACQAJAAkACQAJAAkACQCABQQlrDgoAAQIDBAUGBwgJCgsgAiACKAIAIgFBBGo2AgAgACABKAIANgIADwsgAiACKAIAIgFBBGo2AgAgACABNAIANwMADwsgAiACKAIAIgFBBGo2AgAgACABNQIANwMADwsgAiACKAIAQQdqQXhxIgFBCGo2AgAgACABKQMANwMADwsgAiACKAIAIgFBBGo2AgAgACABMgEANwMADwsgAiACKAIAIgFBBGo2AgAgACABMwEANwMADwsgAiACKAIAIgFBBGo2AgAgACABMAAANwMADwsgAiACKAIAIgFBBGo2AgAgACABMQAANwMADwsgAiACKAIAQQdqQXhxIgFBCGo2AgAgACABKwMAOQMADwsgACACQQARAgALCxkAIAAtAOgBBEAgAEJ/NwNYCyAAQn83A1ALIwAgASABKQMwQgF8NwMwIAIgASAAQQAQESACIAAgAEEAEBELOQECfyAAQQNuIgJBAnQhAQJAAkACQCACQQNsQX9zIABqDgIBAAILIAFBAXIhAQsgAUECaiEBCyABC3oBAn8gAEHA/wBzQQFqQQh2QX9zQS9xIABBwf8Ac0EBakEIdkF/c0ErcSAAQeb/A2pBCHZB/wFxIgEgAEHBAGpxcnIgAEHM/wNqQQh2IgIgAEHHAGpxIAFB/wFzcXIgAEH8AWogAEHC/wNqQQh2cSACQX9zcUH/AXFyC9YBAQV/QX8hBCADQQNuIgZBAnQhBQJAAkACQCAGQQNsQX9zIANqDgIBAAILIAVBAXIhBQsgBUECaiEFCyABIAVLBH8CQCADRQ0AQQAhAUEIIQQDQCABIAItAAAiCHIhBwNAIAAiASAHIAQiBkEGayIEdkE/cRAoOgAAIAFBAWohACAEQQVLDQALIANBAWsiAwRAIAJBAWohAiAHQQh0IQEgBEEIaiEEDAELCyAERQ0AIAEgCEEMIAZrdEE/cRAoOgABIAFBAmohAAsgAEEAOgAAIAUFIAQLC8oEAQN/IwBB4ABrIgQkACADEB8hBSACEBwhAwJAAkAgBUUNACADDQEgAUECSQ0AIABBJDsAACABQQFrIgMgBRAKIgFNDQAgAEEBaiAFIAFBAWoQBSEAIAMgAWsiA0EESQ0AIAAgAWoiAUGk7PUBNgAAIAQgAigCODYCMCAEQUBrIARBMGoQEyADQQNrIgMgBEFAaxAKIgBNDQAgAUEDaiAEQUBrIABBAWoQBSEBIAMgAGsiA0EESQ0AIAAgAWoiAUGk2vUBNgAAIAQgAigCLDYCICAEQUBrIARBIGoQEyADQQNrIgMgBEFAaxAKIgBNDQAgAUEDaiAEQUBrIABBAWoQBSEBIAMgAGsiA0EESQ0AIAAgAWoiAUGs6PUBNgAAIAQgAigCKDYCECAEQUBrIARBEGoQEyADQQNrIgMgBEFAaxAKIgBNDQAgAUEDaiAEQUBrIABBAWoQBSEBIAMgAGsiA0EESQ0AIAAgAWoiAUGs4PUBNgAAIAQgAigCMDYCACAEQUBrIAQQEyADQQNrIgMgBEFAaxAKIgBNDQAgAUEDaiAEQUBrIABBAWoQBSEBIAMgAGsiA0ECSQ0AIAAgAWoiAEEkOwAAIABBAWoiACADQQFrIgYgAigCECACKAIUECkiAUF/RiIFDQBBYSEDIAZBACABIAUbayIGQQJJDQEgACAAIAFqIAUbIgBBJDsAACAAQQFqIAZBAWsgAigCACACKAIEECkhACAEQeAAaiQAQWFBACAAQX9GGw8LQWEhAwsgBEHgAGokACADC7gBAQF/QQAgAEEEaiAAQdD/A2pBCHZBf3NxQTkgAGtBCHZBf3NxQf8BcSAAQcEAayIBIAFBCHZBf3NxQdoAIABrQQh2QX9zcUH/AXEgAEG5AWogAEGf/wNqQQh2QX9zcUH6ACAAa0EIdkF/c3FB/wFxIABB0P8Ac0EBakEIdkF/c0E/cSAAQdT/AHNBAWpBCHZBf3NBPnFycnJyIgFrQQh2QX9zIABBvv8Dc0EBakEIdnFB/wFxIAFyC64BAQR/An8CfyACLAAAECsiBkH/AUYEQEF/DAELA0AgBCAGaiEEAkAgA0EGaiIGQQhJBEAgBiEDDAELIAEoAgAgBU0EQEEADwsgACAEIANBAmsiA3Y6AAAgAEEBaiEAIAVBAWohBQsgAkEBaiICLAAAECsiBkH/AUcEQCAEQQZ0IQQMAQsLQQAgA0EESw0BGkF/IAN0CyEDQQAgBCADQX9zcQ0AGiABIAU2AgAgAgsLrAMBBX8jAEEQayIDJAAgACgCBCEGIAAoAhQhBwJAIAIQHyIERQRAQWYhAgwBC0FgIQIgAS0AACIFQSRHDQAgAUEBaiABIAVBJEYbIgEgBCAEEAoiBBAQIgUNACAAQRA2AjggASABIARqIgEgBRsiBEHfFEEDEBBFBEAgBEEDaiADQQxqEBUiAUUNASAAIAMoAgw2AjgLIAFB6xRBAxAQDQAgAUEDaiADQQxqEBUiAUUNACAAIAMoAgw2AiwgAUHjFEEDEBANACABQQNqIANBDGoQFSIBRQ0AIAAgAygCDDYCKCABQecUQQMQEA0AIAFBA2ogA0EMahAVIgFFDQAgACADKAIMIgQ2AjAgACAENgI0IAEtAABBJEcNACADIAc2AgwgACgCECADQQxqIAFBAWoQLCIBRQ0AIAAgAygCDDYCFCABLQAAQSRHDQAgAyAGNgIMIAAoAgAgA0EMaiABQQFqECwiAUUNACAAIAMoAgw2AgQgAEEANgJEIABCADcCPCAAQgA3AhggAEIANwIgIAAQHCICDQBBYEEAIAEtAAAbIQILIANBEGokACACCykBAn8DQCAAIAJBA3QiA2ogASADaikAADcDACACQQFqIgJBgAFHDQALCwwAIABBAEGACBALGgtlAQJ/IAAgAhAeIgIEfyACBUFdQQACfyAAKAIAIQRBACECIAAoAgQiAAR/A0AgAyACIARqLQAAIAEgAmotAABzciEDIAJBAWoiAiAARw0ACyADQQFrQQh2QQFxQQFrBUEACwsbCwtdAQJ/IwBB8AFrIgMkAEF/IQQCQCACRSAARSABRXJyIAFBwABLcg0AIAMgARAYQQBIDQAgAyACQcAAEAZBAEgNACADIAAgARASIQQLIANB8AEQBCADQfABaiQAIAQLCQAgACABNwAACxAAIwAgAGtBcHEiACQAIAALMwEBfyAAKAIUIgMgASACIAAoAhAgA2siASABIAJLGyIBEAUaIAAgACgCFCABajYCFCACC9oBAQR/IwBB0ABrIggkAAJAIABFBEBBYCEADAELIAggABAKIgk2AgwgCCAJNgIcIAggCRAJIgo2AhggCCAJEAkiCzYCCEEAIQkCQAJAIApFIAtFcg0AIAggAjYCFCAIIAE2AhAgCEEIaiAAIAcQLSIADQEgCCgCCCEJIAggCCgCDBAJIgA2AgggAEUNACAIIAY2AiwgCCAFNgIoIAggBDYCJCAIIAM2AiAgCEEIaiAJIAcQMCEADAELQWohAAsgCCgCGBAIIAgoAggQCCAJEAgLIAhB0ABqJAAgAAuQAgEDfyMAQdAAayIRJABBfiETAkAgCEEESQ0AIAgQCSISRQRAQWohEwwBCyARQQA2AkwgEUIANwJEIBEgAjYCPCARIAI2AjggESABNgI0IBEgADYCMCARIA82AiwgESAONgIoIBEgDTYCJCAR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IGxvbmcgb3IgdG9vIHNob3J0AE1pc3NpbmcgYXJndW1lbnRzAFRvbyBtYW55IGxhbmVzAFRvbyBmZXcgbGFuZXMAVG9vIG1hbnkgdGhyZWFkcwBOb3QgZW5vdWdoIHRocmVhZHMATWVtb3J5IGFsbG9jYXRpb24gZXJyb3IATWVtb3J5IGNvc3QgaXMgdG9vIHNtYWxsAFRpbWUgY29zdCBpcyB0b28gc21hbGwAYXJnb24yaQBBcmdvbjJpAFRoZSBwYXNzd29yZCBkb2VzIG5vdCBtYXRjaCB0aGUgc3VwcGxpZWQgaGFzaABPdXRwdXQgcG9pbnRlciBtaXNtYXRjaABPdXRwdXQgaXMgdG9vIGxvbmcAU2FsdCBpcyB0b28gbG9uZwBTZWNyZXQgaXMgdG9vIGxvbmcAUGFzc3dvcmQgaXMgdG9vIGxvbmcAQXNzb2NpYXRlZCBkYXRhIGlzIHRvbyBsb25nAFRocmVhZGluZyBmYWlsdXJlAE1lbW9yeSBjb3N0IGlzIHRvbyBsYXJnZQBUaW1lIGNvc3QgaXMgdG9vIGxhcmdlAFVua25vd24gZXJyb3IgY29kZQBhcmdvbjJpZABBcmdvbjJpZABFbmNvZGluZyBmYWlsZWQARGVjb2RpbmcgZmFpbGVkAGFyZ29uMmQAQXJnb24yZABBcmdvbjJfQ29udGV4dCBjb250ZXh0IGlzIE5VTEwAT3V0cHV0IHBvaW50ZXIgaXMgTlVMTABUaGUgYWxsb2NhdGUgbWVtb3J5IGNhbGxiYWNrIGlzIE5VTEwAVGhlIGZyZWUgbWVtb3J5IGNhbGxiYWNrIGlzIE5VTEwAT0sAJHY9ACx0PQAscD0AJG09AFRoZXJlIGlzIG5vIHN1Y2ggdmVyc2lvbiBvZiBBcmdvbjIAU2FsdCBwb2ludGVyIGlzIE5VTEwsIGJ1dCBzYWx0IGxlbmd0aCBpcyBub3QgMABTZWNyZXQgcG9pbnRlciBpcyBOVUxMLCBidXQgc2VjcmV0IGxlbmd0aCBpcyBub3QgMABQYXNzd29yZCBwb2ludGVyIGlzIE5VTEwsIGJ1dCBwYXNzd29yZCBsZW5ndGggaXMgbm90IDAAQXNzb2NpYXRlZCBkYXRhIHBvaW50ZXIgaXMgTlVMTCwgYnV0IGFkIGxlbmd0aCBpcyBub3QgMAAobnVsbCkAAACbCAAAuwcAAEkJAADACQAAsAkAAPAHAAAfCAAAMAgAAMkIAABvCgAA4AkAABYKAAA7CgAAQwgAACsLAADBCgAAkgoAAPQKAAACCAAAEQgAAFsJAABbCAAAdAkAAHQIAAAFCQAAdAcAAC0JAACeBwAA9AgAAGIHAAAYCQAAiAcAAOEIAABOBwAA/wkAAFwKAAABAEGkGAsBAgBByxgLBf//////AEGQGQtBEQAKABEREQAAAAAFAAAAAAAACQAAAAALAAAAAAAAAAARAA8KERERAwoHAAEACQsLAAAJBgsAAAsABhEAAAAREREAQeEZCyELAAAAAAAAAAARAAoKERERAAoAAAIACQsAAAAJAAsAAAsAQZsaCwEMAEGnGgsVDAAAAAAMAAAAAAkMAAAAAAAMAAAMAEHVGgsBDgBB4RoLFQ0AAAAEDQAAAAAJDgAAAAAADgAADgBBjxsLARAAQZsbCx4PAAAAAA8AAAAACRAAAAAAABAAABAAABIAAAASEhIAQdIbCw4SAAAAEhISAAAAAAAACQBBgxwLAQsAQY8cCxUKAAAAAAoAAAAACQsAAAAAAAsAAAsAQb0cCwEMAEHJHAsnDAAAAAAMAAAAAAkMAAAAAAAMAAAMAAAwMTIzNDU2Nzg5QUJDREVGAEHwHAsBAQBBoB4LAogPAEHYHgsDkBFQ"},145:()=>{},967:()=>{}},B={};function Q(A){var I=B[A];if(void 0!==I)return I.exports;var C=B[A]={exports:{}};return g[A].call(C.exports,C,C.exports,Q),C.exports}return I=Object.getPrototypeOf?A=>Object.getPrototypeOf(A):A=>A.__proto__,Q.t=function(g,B){if(1&B&&(g=this(g)),8&B)return g;if("object"==typeof g&&g){if(4&B&&g.__esModule)return g;if(16&B&&"function"==typeof g.then)return g}var C=Object.create(null);Q.r(C);var E={};A=A||[null,I({}),I([]),I(I)];for(var i=2&B&&g;"object"==typeof i&&!~A.indexOf(i);i=I(i))Object.getOwnPropertyNames(i).forEach((A=>E[A]=()=>g[A]));return E.default=()=>g,Q.d(C,E),C},Q.d=(A,I)=>{for(var g in I)Q.o(I,g)&&!Q.o(A,g)&&Object.defineProperty(A,g,{enumerable:!0,get:I[g]})},Q.o=(A,I)=>Object.prototype.hasOwnProperty.call(A,I),Q.r=A=>{"undefined"!=typeof Symbol&&Symbol.toStringTag&&Object.defineProperty(A,Symbol.toStringTag,{value:"Module"}),Object.defineProperty(A,"__esModule",{value:!0})},Q(631)})()}));</script>
+<script>var NobleCiphers=(()=>{var ft=Object.defineProperty;var Rt=Object.getOwnPropertyDescriptor;var Ot=Object.getOwnPropertyNames;var kt=Object.prototype.hasOwnProperty;var St=(e,t)=>{for(var i in t)ft(e,i,{get:t[i],enumerable:!0})},Ct=(e,t,i,n)=>{if(t&&typeof t=="object"||typeof t=="function")for(let f of Ot(t))!kt.call(e,f)&&f!==i&&ft(e,f,{get:()=>t[f],enumerable:!(n=Rt(t,f))||n.enumerable});return e};var jt=e=>Ct(ft({},"__esModule",{value:!0}),e);var Gt={};St(Gt,{xchacha20poly1305:()=>Tt});function it(e){return e instanceof Uint8Array||ArrayBuffer.isView(e)&&e.constructor.name==="Uint8Array"&&"BYTES_PER_ELEMENT"in e&&e.BYTES_PER_ELEMENT===1}var ot=e=>e?`"${e}" `:"";function st(e,t=""){if(typeof e!="boolean")throw new TypeError(ot(t)+"expected boolean, got type="+typeof e);return e}function Y(e,t=""){if(typeof e!="number")throw new TypeError(ot(t)+"expected number, got "+typeof e);if(!Number.isSafeInteger(e)||e<0)throw new RangeError(ot(t)+"expected integer >= 0, got "+e);return e}function j(e,t,i=""){if(it(e)&&(t===void 0||e.length===t))return e;t!==void 0&&Y(t,"length");let n=it(e),f=t!==void 0?` of length ${t}`:"",s=n?`length=${e.length}`:`type=${typeof e}`,o=ot(i)+"expected Uint8Array"+f+", got "+s;throw n?new RangeError(o):new TypeError(o)}var lt=(e,t)=>{if(e===null||typeof e!="object"||Array.isArray(e))throw new TypeError(t==="object"?"expected valid options object":`"${t}" expected object, got type=${typeof e}`)};function ct(e,t=!0){if(e.destroyed)throw new Error("hash was destroyed");if(t&&e.finished)throw new Error("digest() was already called")}function pt(e,t){j(e,void 0,"output");let i=t.outputLen;if(!(e.length>=i))throw new RangeError('"output" expected length >= '+i)}function H(e){return new Uint32Array(e.buffer,e.byteOffset,Math.floor(e.byteLength/4))}function v(...e){for(let t=0;t<e.length;t++)e[t].fill(0)}function Mt(e){return new DataView(e.buffer,e.byteOffset,e.byteLength)}var D=new Uint8Array(new Uint32Array([287454020]).buffer)[0]===68;function Nt(e){return e<<24&4278190080|e<<8&16711680|e>>>8&65280|e>>>24&255}function _t(e){for(let t=0;t<e.length;t++)e[t]=Nt(e[t]);return e}var P=D?e=>e:_t;function $t(e,t){return!e.byteLength||!t.byteLength?!1:e.buffer===t.buffer&&e.byteOffset<t.byteOffset+t.byteLength&&t.byteOffset<e.byteOffset+e.byteLength}function ut(e,t){if($t(e,t)&&e.byteOffset<t.byteOffset)throw new Error("complex overlap of input and output is not supported")}function yt(e,t){return lt(e,"defaults"),lt(t,"opts"),Object.assign(e,t)}function dt(e,t){if(e=j(e),t=j(t),e.length!==t.length)return!1;let i=0;for(let n=0;n<e.length;n++)i|=e[n]^t[n];return i===0}function gt(e,t,i){let n=t,f=i||(()=>[]),s=(r,c)=>n(c,...f(r)).update(r).digest(),o=n(new Uint8Array(e),...f(new Uint8Array(0)));return s.outputLen=o.outputLen,s.blockLen=o.blockLen,s.create=(r,...c)=>n(r,...c),s}var xt=(e,t)=>{function i(n,...f){if(j(n,void 0,"key"),e.nonceLength!==void 0){let a=f[0];j(a,e.varSizeNonce?void 0:e.nonceLength,"nonce")}let s=e.tagLength,o=e.nonceLength!==void 0?1:0;if(!e.withAAD){for(let a=o;a<f.length;a++)if(it(f[a]))throw new Error("AAD not supported")}e.withAAD&&f[o]!==void 0&&j(f[o],void 0,"AAD");let r=t(n,...f),c=(a,g)=>{if(g!==void 0){if(a!==2)throw new Error("cipher output not supported");j(g,void 0,"output")}},l=!1;return{encrypt(a,g){if(l)throw new Error("cannot encrypt() twice with same key + nonce");return l=!0,j(a,void 0,"data"),c(r.encrypt.length,g),r.encrypt(a,g)},decrypt(a,g){if(j(a,void 0,"data"),s&&a.length<s)throw new Error('"ciphertext" expected length >= tagLength='+s);return c(r.decrypt.length,g),r.decrypt(a,g)}}}return Object.assign(i,e),i};function et(e,t,i=!0){if(t===void 0)return new Uint8Array(e);if(j(t,e,"output"),i&&!nt(t))throw new Error("invalid output, must be aligned");return t}function wt(e,t,i){Y(e),Y(t),st(i);let n=new Uint8Array(16),f=Mt(n);return f.setBigUint64(0,BigInt(t),i),f.setBigUint64(8,BigInt(e),i),n}function nt(e){return e.byteOffset%4===0}function tt(e){return Uint8Array.from(j(e))}var Lt=e=>Uint8Array.from(e.split(""),t=>t.charCodeAt(0)),zt=P(H(Lt("expand 16-byte k"))),It=P(H(Lt("expand 32-byte k")));function p(e,t){return e<<t|e>>>32-t}var rt=64,vt=16,ht=2**32-1,bt=Uint32Array.of();function Pt(e,t,i,n,f,s,o,r){let c=f.length,l=new Uint8Array(rt),d=H(l),a=D&&nt(f)&&nt(s),g=a?H(f):bt,N=a?H(s):bt;if(!D){for(let u=0;u<c;o++){if(e(t,i,n,d,o,r),P(d),o>=ht)throw new Error("arx: counter overflow");let O=Math.min(rt,c-u);for(let y=0,x;y<O;y++)x=u+y,s[x]=f[x]^l[y];u+=O}return}for(let u=0;u<c;o++){if(e(t,i,n,d,o,r),o>=ht)throw new Error("arx: counter overflow");let O=Math.min(rt,c-u);if(a&&O===rt){let y=u/4;if(u%4!==0)throw new Error("arx: invalid block position");for(let x=0,_;x<vt;x++)_=y+x,N[_]=g[_]^d[x];u+=rt;continue}for(let y=0,x;y<O;y++)x=u+y,s[x]=f[x]^l[y];u+=O}}function Et(e,t){let{allowShortKeys:i,extendNonceFn:n,counterLength:f,counterRight:s,rounds:o}=yt({allowShortKeys:!1,counterLength:8,counterRight:!1,rounds:20},t);if(typeof e!="function")throw new Error("core must be a function");return Y(f),Y(o),st(s),st(i),(r,c,l,d,a=0)=>{j(r,void 0,"key"),j(c,void 0,"nonce"),j(l,void 0,"data");let g=l.length,N=d!==void 0;if(d=et(g,d,!1),N&&ut(l,d),Y(a),a<0||a>=ht)throw new Error("arx: counter overflow");let u=[],O=r.length,y,x;if(O===32)u.push(y=tt(r)),x=It;else if(O===16&&i)y=new Uint8Array(32),y.set(r),y.set(r,16),x=zt,u.push(y);else throw j(r,32,"arx key"),new Error("invalid key size");(!D||!nt(c))&&u.push(c=tt(c));let _=H(y);if(n){if(c.length!==24)throw new Error("arx: extended nonce must be 24 bytes");let K=c.subarray(0,16);if(D)n(x,_,H(K),_);else{let M=P(Uint32Array.from(x));n(M,_,H(K),_),v(M),P(_)}c=c.subarray(16)}else D||P(_);let V=16-f;if(V!==c.length)throw new Error(`arx: nonce must be ${V} or 16 bytes`);if(V!==12){let K=new Uint8Array(12);K.set(c,s?0:12-c.length),c=K,u.push(c)}let G=P(H(c));try{return Pt(e,x,_,G,l,d,a,o),d}finally{v(...u)}}}function $(e,t){return e[t++]&255|(e[t++]&255)<<8}var at=class{blockLen=16;outputLen=16;buffer=new Uint8Array(16);r=new Uint16Array(10);h=new Uint16Array(10);pad=new Uint16Array(8);pos=0;finished=!1;destroyed=!1;constructor(t){t=tt(j(t,32,"key"));let i=$(t,0),n=$(t,2),f=$(t,4),s=$(t,6),o=$(t,8),r=$(t,10),c=$(t,12),l=$(t,14);this.r[0]=i&8191,this.r[1]=(i>>>13|n<<3)&8191,this.r[2]=(n>>>10|f<<6)&7939,this.r[3]=(f>>>7|s<<9)&8191,this.r[4]=(s>>>4|o<<12)&255,this.r[5]=o>>>1&8190,this.r[6]=(o>>>14|r<<2)&8191,this.r[7]=(r>>>11|c<<5)&8065,this.r[8]=(c>>>8|l<<8)&8191,this.r[9]=l>>>5&127;for(let d=0;d<8;d++)this.pad[d]=$(t,16+2*d)}process(t,i,n=!1){let f=n?0:2048,{h:s,r:o}=this,r=o[0],c=o[1],l=o[2],d=o[3],a=o[4],g=o[5],N=o[6],u=o[7],O=o[8],y=o[9],x=$(t,i+0),_=$(t,i+2),V=$(t,i+4),G=$(t,i+6),K=$(t,i+8),M=$(t,i+10),z=$(t,i+12),I=$(t,i+14),w=s[0]+(x&8191),b=s[1]+((x>>>13|_<<3)&8191),L=s[2]+((_>>>10|V<<6)&8191),E=s[3]+((V>>>7|G<<9)&8191),A=s[4]+((G>>>4|K<<12)&8191),m=s[5]+(K>>>1&8191),U=s[6]+((K>>>14|M<<2)&8191),B=s[7]+((M>>>11|z<<5)&8191),T=s[8]+((z>>>8|I<<8)&8191),R=s[9]+(I>>>5|f),h=0,S=h+w*r+b*(5*y)+L*(5*O)+E*(5*u)+A*(5*N);h=S>>>13,S&=8191,S+=m*(5*g)+U*(5*a)+B*(5*d)+T*(5*l)+R*(5*c),h+=S>>>13,S&=8191;let C=h+w*c+b*r+L*(5*y)+E*(5*O)+A*(5*u);h=C>>>13,C&=8191,C+=m*(5*N)+U*(5*g)+B*(5*a)+T*(5*d)+R*(5*l),h+=C>>>13,C&=8191;let k=h+w*l+b*c+L*r+E*(5*y)+A*(5*O);h=k>>>13,k&=8191,k+=m*(5*u)+U*(5*N)+B*(5*g)+T*(5*a)+R*(5*d),h+=k>>>13,k&=8191;let q=h+w*d+b*l+L*c+E*r+A*(5*y);h=q>>>13,q&=8191,q+=m*(5*O)+U*(5*u)+B*(5*N)+T*(5*g)+R*(5*a),h+=q>>>13,q&=8191;let F=h+w*a+b*d+L*l+E*c+A*r;h=F>>>13,F&=8191,F+=m*(5*y)+U*(5*O)+B*(5*u)+T*(5*N)+R*(5*g),h+=F>>>13,F&=8191;let Z=h+w*g+b*a+L*d+E*l+A*c;h=Z>>>13,Z&=8191,Z+=m*r+U*(5*y)+B*(5*O)+T*(5*u)+R*(5*N),h+=Z>>>13,Z&=8191;let J=h+w*N+b*g+L*a+E*d+A*l;h=J>>>13,J&=8191,J+=m*c+U*r+B*(5*y)+T*(5*O)+R*(5*u),h+=J>>>13,J&=8191;let Q=h+w*u+b*N+L*g+E*a+A*d;h=Q>>>13,Q&=8191,Q+=m*l+U*c+B*r+T*(5*y)+R*(5*O),h+=Q>>>13,Q&=8191;let W=h+w*O+b*u+L*N+E*g+A*a;h=W>>>13,W&=8191,W+=m*d+U*l+B*c+T*r+R*(5*y),h+=W>>>13,W&=8191;let X=h+w*y+b*O+L*u+E*N+A*g;h=X>>>13,X&=8191,X+=m*a+U*d+B*l+T*c+R*r,h+=X>>>13,X&=8191,h=(h<<2)+h|0,h=h+S|0,S=h&8191,h=h>>>13,C+=h,s[0]=S,s[1]=C,s[2]=k,s[3]=q,s[4]=F,s[5]=Z,s[6]=J,s[7]=Q,s[8]=W,s[9]=X}finalize(){let{h:t,pad:i}=this,n=new Uint16Array(10),f=t[1]>>>13;t[1]&=8191;for(let r=2;r<10;r++)t[r]+=f,f=t[r]>>>13,t[r]&=8191;t[0]+=f*5,f=t[0]>>>13,t[0]&=8191,t[1]+=f,f=t[1]>>>13,t[1]&=8191,t[2]+=f,n[0]=t[0]+5,f=n[0]>>>13,n[0]&=8191;for(let r=1;r<10;r++)n[r]=t[r]+f,f=n[r]>>>13,n[r]&=8191;n[9]-=8192;let s=(f^1)-1;for(let r=0;r<10;r++)n[r]&=s;s=~s;for(let r=0;r<10;r++)t[r]=t[r]&s|n[r];t[0]=(t[0]|t[1]<<13)&65535,t[1]=(t[1]>>>3|t[2]<<10)&65535,t[2]=(t[2]>>>6|t[3]<<7)&65535,t[3]=(t[3]>>>9|t[4]<<4)&65535,t[4]=(t[4]>>>12|t[5]<<1|t[6]<<14)&65535,t[5]=(t[6]>>>2|t[7]<<11)&65535,t[6]=(t[7]>>>5|t[8]<<8)&65535,t[7]=(t[8]>>>8|t[9]<<5)&65535;let o=t[0]+i[0];t[0]=o&65535;for(let r=1;r<8;r++)o=(t[r]+i[r]|0)+(o>>>16)|0,t[r]=o&65535;v(n)}update(t){ct(this),j(t),t=tt(t);let{buffer:i,blockLen:n}=this,f=t.length;for(let s=0;s<f;){let o=Math.min(n-this.pos,f-s);if(o===n){for(;n<=f-s;s+=n)this.process(t,s);continue}i.set(t.subarray(s,s+o),this.pos),this.pos+=o,s+=o,this.pos===n&&(this.process(i,0,!1),this.pos=0)}return this}destroy(){this.destroyed=!0,v(this.h,this.r,this.buffer,this.pad)}digestInto(t){ct(this),pt(t,this),this.finished=!0;let{buffer:i,h:n}=this,{pos:f}=this;if(f){for(i[f++]=1;f<16;f++)i[f]=0;this.process(i,0,!0)}this.finalize();let s=0;for(let o=0;o<8;o++)t[s++]=n[o]>>>0,t[s++]=n[o]>>>8}digest(){let{buffer:t,outputLen:i}=this;this.digestInto(t);let n=t.slice(0,i);return this.destroy(),n}},At=gt(32,e=>new at(e));function Bt(e,t,i,n,f,s=20){let o=e[0],r=e[1],c=e[2],l=e[3],d=t[0],a=t[1],g=t[2],N=t[3],u=t[4],O=t[5],y=t[6],x=t[7],_=f,V=i[0],G=i[1],K=i[2],M=o,z=r,I=c,w=l,b=d,L=a,E=g,A=N,m=u,U=O,B=y,T=x,R=_,h=V,S=G,C=K;for(let q=0;q<s;q+=2)M=M+b|0,R=p(R^M,16),m=m+R|0,b=p(b^m,12),M=M+b|0,R=p(R^M,8),m=m+R|0,b=p(b^m,7),z=z+L|0,h=p(h^z,16),U=U+h|0,L=p(L^U,12),z=z+L|0,h=p(h^z,8),U=U+h|0,L=p(L^U,7),I=I+E|0,S=p(S^I,16),B=B+S|0,E=p(E^B,12),I=I+E|0,S=p(S^I,8),B=B+S|0,E=p(E^B,7),w=w+A|0,C=p(C^w,16),T=T+C|0,A=p(A^T,12),w=w+A|0,C=p(C^w,8),T=T+C|0,A=p(A^T,7),M=M+L|0,C=p(C^M,16),B=B+C|0,L=p(L^B,12),M=M+L|0,C=p(C^M,8),B=B+C|0,L=p(L^B,7),z=z+E|0,R=p(R^z,16),T=T+R|0,E=p(E^T,12),z=z+E|0,R=p(R^z,8),T=T+R|0,E=p(E^T,7),I=I+A|0,h=p(h^I,16),m=m+h|0,A=p(A^m,12),I=I+A|0,h=p(h^I,8),m=m+h|0,A=p(A^m,7),w=w+b|0,S=p(S^w,16),U=U+S|0,b=p(b^U,12),w=w+b|0,S=p(S^w,8),U=U+S|0,b=p(b^U,7);let k=0;n[k++]=o+M|0,n[k++]=r+z|0,n[k++]=c+I|0,n[k++]=l+w|0,n[k++]=d+b|0,n[k++]=a+L|0,n[k++]=g+E|0,n[k++]=N+A|0,n[k++]=u+m|0,n[k++]=O+U|0,n[k++]=y+B|0,n[k++]=x+T|0,n[k++]=_+R|0,n[k++]=V+h|0,n[k++]=G+S|0,n[k++]=K+C|0}function Kt(e,t,i,n){let f=D?e:P(e.slice(0,4)),s=D?t:P(t.slice(0,8)),o=D?i:P(i.slice(0,4)),r=new Uint32Array(16);Bt(f,s,o.subarray(1),r,o[0]);let c=0;n[c++]=r[0]-f[0]|0,n[c++]=r[1]-f[1]|0,n[c++]=r[2]-f[2]|0,n[c++]=r[3]-f[3]|0,n[c++]=r[12]-o[0]|0,n[c++]=r[13]-o[1]|0,n[c++]=r[14]-o[2]|0,n[c++]=r[15]-o[3]|0,P(n),D||v(f,s,o),v(r)}var Dt=Et(Bt,{counterRight:!1,counterLength:8,extendNonceFn:Kt,allowShortKeys:!1});var Ht=new Uint8Array(16),mt=(e,t)=>{e.update(t);let i=t.length%16;i&&e.update(Ht.subarray(i))},Vt=new Uint8Array(32);function Ut(e,t,i,n,f){f!==void 0&&j(f,void 0,"AAD");let s=e(t,i,Vt),o=wt(n.length,f?f.length:0,!0),r=At.create(s);f&&mt(r,f),mt(r,n),r.update(o);let c=r.digest();return v(s,o),c}var qt=e=>(t,i,n)=>({encrypt(s,o){let r=s.length;o=et(r+16,o,!1),o.set(s);let c=o.subarray(0,-16);e(t,i,c,c,1);let l=Ut(e,t,i,c,n);return o.set(l,r),v(l),o},decrypt(s,o){o=et(s.length-16,o,!1);let r=s.subarray(0,-16),c=s.subarray(-16),l=Ut(e,t,i,r,n);if(!dt(c,l))throw v(l),new Error("invalid tag");return o.set(s.subarray(0,-16)),e(t,i,o,o,1),v(l),o}});var Tt=xt({blockSize:64,nonceLength:24,tagLength:16,withAAD:!0},qt(Dt));return jt(Gt);})();
+/*! Bundled license information:
+
+@noble/ciphers/utils.js:
+  (*! noble-ciphers - MIT License (c) 2023 Paul Miller (paulmillr.com) *)
+*/
+</script>
+<script>window.BIP39_WORDLIST = ["abandon","ability","able","about","above","absent","absorb","abstract","absurd","abuse","access","accident","account","accuse","achieve","acid","acoustic","acquire","across","act","action","actor","actress","actual","adapt","add","addict","address","adjust","admit","adult","advance","advice","aerobic","affair","afford","afraid","again","age","agent","agree","ahead","aim","air","airport","aisle","alarm","album","alcohol","alert","alien","all","alley","allow","almost","alone","alpha","already","also","alter","always","amateur","amazing","among","amount","amused","analyst","anchor","ancient","anger","angle","angry","animal","ankle","announce","annual","another","answer","antenna","antique","anxiety","any","apart","apology","appear","apple","approve","april","arch","arctic","area","arena","argue","arm","armed","armor","army","around","arrange","arrest","arrive","arrow","art","artefact","artist","artwork","ask","aspect","assault","asset","assist","assume","asthma","athlete","atom","attack","attend","attitude","attract","auction","audit","august","aunt","author","auto","autumn","average","avocado","avoid","awake","aware","away","awesome","awful","awkward","axis","baby","bachelor","bacon","badge","bag","balance","balcony","ball","bamboo","banana","banner","bar","barely","bargain","barrel","base","basic","basket","battle","beach","bean","beauty","because","become","beef","before","begin","behave","behind","believe","below","belt","bench","benefit","best","betray","better","between","beyond","bicycle","bid","bike","bind","biology","bird","birth","bitter","black","blade","blame","blanket","blast","bleak","bless","blind","blood","blossom","blouse","blue","blur","blush","board","boat","body","boil","bomb","bone","bonus","book","boost","border","boring","borrow","boss","bottom","bounce","box","boy","bracket","brain","brand","brass","brave","bread","breeze","brick","bridge","brief","bright","bring","brisk","broccoli","broken","bronze","broom","brother","brown","brush","bubble","buddy","budget","buffalo","build","bulb","bulk","bullet","bundle","bunker","burden","burger","burst","bus","business","busy","butter","buyer","buzz","cabbage","cabin","cable","cactus","cage","cake","call","calm","camera","camp","can","canal","cancel","candy","cannon","canoe","canvas","canyon","capable","capital","captain","car","carbon","card","cargo","carpet","carry","cart","case","cash","casino","castle","casual","cat","catalog","catch","category","cattle","caught","cause","caution","cave","ceiling","celery","cement","census","century","cereal","certain","chair","chalk","champion","change","chaos","chapter","charge","chase","chat","cheap","check","cheese","chef","cherry","chest","chicken","chief","child","chimney","choice","choose","chronic","chuckle","chunk","churn","cigar","cinnamon","circle","citizen","city","civil","claim","clap","clarify","claw","clay","clean","clerk","clever","click","client","cliff","climb","clinic","clip","clock","clog","close","cloth","cloud","clown","club","clump","cluster","clutch","coach","coast","coconut","code","coffee","coil","coin","collect","color","column","combine","come","comfort","comic","common","company","concert","conduct","confirm","congress","connect","consider","control","convince","cook","cool","copper","copy","coral","core","corn","correct","cost","cotton","couch","country","couple","course","cousin","cover","coyote","crack","cradle","craft","cram","crane","crash","crater","crawl","crazy","cream","credit","creek","crew","cricket","crime","crisp","critic","crop","cross","crouch","crowd","crucial","cruel","cruise","crumble","crunch","crush","cry","crystal","cube","culture","cup","cupboard","curious","current","curtain","curve","cushion","custom","cute","cycle","dad","damage","damp","dance","danger","daring","dash","daughter","dawn","day","deal","debate","debris","decade","december","decide","decline","decorate","decrease","deer","defense","define","defy","degree","delay","deliver","demand","demise","denial","dentist","deny","depart","depend","deposit","depth","deputy","derive","describe","desert","design","desk","despair","destroy","detail","detect","develop","device","devote","diagram","dial","diamond","diary","dice","diesel","diet","differ","digital","dignity","dilemma","dinner","dinosaur","direct","dirt","disagree","discover","disease","dish","dismiss","disorder","display","distance","divert","divide","divorce","dizzy","doctor","document","dog","doll","dolphin","domain","donate","donkey","donor","door","dose","double","dove","draft","dragon","drama","drastic","draw","dream","dress","drift","drill","drink","drip","drive","drop","drum","dry","duck","dumb","dune","during","dust","dutch","duty","dwarf","dynamic","eager","eagle","early","earn","earth","easily","east","easy","echo","ecology","economy","edge","edit","educate","effort","egg","eight","either","elbow","elder","electric","elegant","element","elephant","elevator","elite","else","embark","embody","embrace","emerge","emotion","employ","empower","empty","enable","enact","end","endless","endorse","enemy","energy","enforce","engage","engine","enhance","enjoy","enlist","enough","enrich","enroll","ensure","enter","entire","entry","envelope","episode","equal","equip","era","erase","erode","erosion","error","erupt","escape","essay","essence","estate","eternal","ethics","evidence","evil","evoke","evolve","exact","example","excess","exchange","excite","exclude","excuse","execute","exercise","exhaust","exhibit","exile","exist","exit","exotic","expand","expect","expire","explain","expose","express","extend","extra","eye","eyebrow","fabric","face","faculty","fade","faint","faith","fall","false","fame","family","famous","fan","fancy","fantasy","farm","fashion","fat","fatal","father","fatigue","fault","favorite","feature","february","federal","fee","feed","feel","female","fence","festival","fetch","fever","few","fiber","fiction","field","figure","file","film","filter","final","find","fine","finger","finish","fire","firm","first","fiscal","fish","fit","fitness","fix","flag","flame","flash","flat","flavor","flee","flight","flip","float","flock","floor","flower","fluid","flush","fly","foam","focus","fog","foil","fold","follow","food","foot","force","forest","forget","fork","fortune","forum","forward","fossil","foster","found","fox","fragile","frame","frequent","fresh","friend","fringe","frog","front","frost","frown","frozen","fruit","fuel","fun","funny","furnace","fury","future","gadget","gain","galaxy","gallery","game","gap","garage","garbage","garden","garlic","garment","gas","gasp","gate","gather","gauge","gaze","general","genius","genre","gentle","genuine","gesture","ghost","giant","gift","giggle","ginger","giraffe","girl","give","glad","glance","glare","glass","glide","glimpse","globe","gloom","glory","glove","glow","glue","goat","goddess","gold","good","goose","gorilla","gospel","gossip","govern","gown","grab","grace","grain","grant","grape","grass","gravity","great","green","grid","grief","grit","grocery","group","grow","grunt","guard","guess","guide","guilt","guitar","gun","gym","habit","hair","half","hammer","hamster","hand","happy","harbor","hard","harsh","harvest","hat","have","hawk","hazard","head","health","heart","heavy","hedgehog","height","hello","helmet","help","hen","hero","hidden","high","hill","hint","hip","hire","history","hobby","hockey","hold","hole","holiday","hollow","home","honey","hood","hope","horn","horror","horse","hospital","host","hotel","hour","hover","hub","huge","human","humble","humor","hundred","hungry","hunt","hurdle","hurry","hurt","husband","hybrid","ice","icon","idea","identify","idle","ignore","ill","illegal","illness","image","imitate","immense","immune","impact","impose","improve","impulse","inch","include","income","increase","index","indicate","indoor","industry","infant","inflict","inform","inhale","inherit","initial","inject","injury","inmate","inner","innocent","input","inquiry","insane","insect","inside","inspire","install","intact","interest","into","invest","invite","involve","iron","island","isolate","issue","item","ivory","jacket","jaguar","jar","jazz","jealous","jeans","jelly","jewel","job","join","joke","journey","joy","judge","juice","jump","jungle","junior","junk","just","kangaroo","keen","keep","ketchup","key","kick","kid","kidney","kind","kingdom","kiss","kit","kitchen","kite","kitten","kiwi","knee","knife","knock","know","lab","label","labor","ladder","lady","lake","lamp","language","laptop","large","later","latin","laugh","laundry","lava","law","lawn","lawsuit","layer","lazy","leader","leaf","learn","leave","lecture","left","leg","legal","legend","leisure","lemon","lend","length","lens","leopard","lesson","letter","level","liar","liberty","library","license","life","lift","light","like","limb","limit","link","lion","liquid","list","little","live","lizard","load","loan","lobster","local","lock","logic","lonely","long","loop","lottery","loud","lounge","love","loyal","lucky","luggage","lumber","lunar","lunch","luxury","lyrics","machine","mad","magic","magnet","maid","mail","main","major","make","mammal","man","manage","mandate","mango","mansion","manual","maple","marble","march","margin","marine","market","marriage","mask","mass","master","match","material","math","matrix","matter","maximum","maze","meadow","mean","measure","meat","mechanic","medal","media","melody","melt","member","memory","mention","menu","mercy","merge","merit","merry","mesh","message","metal","method","middle","midnight","milk","million","mimic","mind","minimum","minor","minute","miracle","mirror","misery","miss","mistake","mix","mixed","mixture","mobile","model","modify","mom","moment","monitor","monkey","monster","month","moon","moral","more","morning","mosquito","mother","motion","motor","mountain","mouse","move","movie","much","muffin","mule","multiply","muscle","museum","mushroom","music","must","mutual","myself","mystery","myth","naive","name","napkin","narrow","nasty","nation","nature","near","neck","need","negative","neglect","neither","nephew","nerve","nest","net","network","neutral","never","news","next","nice","night","noble","noise","nominee","noodle","normal","north","nose","notable","note","nothing","notice","novel","now","nuclear","number","nurse","nut","oak","obey","object","oblige","obscure","observe","obtain","obvious","occur","ocean","october","odor","off","offer","office","often","oil","okay","old","olive","olympic","omit","once","one","onion","online","only","open","opera","opinion","oppose","option","orange","orbit","orchard","order","ordinary","organ","orient","original","orphan","ostrich","other","outdoor","outer","output","outside","oval","oven","over","own","owner","oxygen","oyster","ozone","pact","paddle","page","pair","palace","palm","panda","panel","panic","panther","paper","parade","parent","park","parrot","party","pass","patch","path","patient","patrol","pattern","pause","pave","payment","peace","peanut","pear","peasant","pelican","pen","penalty","pencil","people","pepper","perfect","permit","person","pet","phone","photo","phrase","physical","piano","picnic","picture","piece","pig","pigeon","pill","pilot","pink","pioneer","pipe","pistol","pitch","pizza","place","planet","plastic","plate","play","please","pledge","pluck","plug","plunge","poem","poet","point","polar","pole","police","pond","pony","pool","popular","portion","position","possible","post","potato","pottery","poverty","powder","power","practice","praise","predict","prefer","prepare","present","pretty","prevent","price","pride","primary","print","priority","prison","private","prize","problem","process","produce","profit","program","project","promote","proof","property","prosper","protect","proud","provide","public","pudding","pull","pulp","pulse","pumpkin","punch","pupil","puppy","purchase","purity","purpose","purse","push","put","puzzle","pyramid","quality","quantum","quarter","question","quick","quit","quiz","quote","rabbit","raccoon","race","rack","radar","radio","rail","rain","raise","rally","ramp","ranch","random","range","rapid","rare","rate","rather","raven","raw","razor","ready","real","reason","rebel","rebuild","recall","receive","recipe","record","recycle","reduce","reflect","reform","refuse","region","regret","regular","reject","relax","release","relief","rely","remain","remember","remind","remove","render","renew","rent","reopen","repair","repeat","replace","report","require","rescue","resemble","resist","resource","response","result","retire","retreat","return","reunion","reveal","review","reward","rhythm","rib","ribbon","rice","rich","ride","ridge","rifle","right","rigid","ring","riot","ripple","risk","ritual","rival","river","road","roast","robot","robust","rocket","romance","roof","rookie","room","rose","rotate","rough","round","route","royal","rubber","rude","rug","rule","run","runway","rural","sad","saddle","sadness","safe","sail","salad","salmon","salon","salt","salute","same","sample","sand","satisfy","satoshi","sauce","sausage","save","say","scale","scan","scare","scatter","scene","scheme","school","science","scissors","scorpion","scout","scrap","screen","script","scrub","sea","search","season","seat","second","secret","section","security","seed","seek","segment","select","sell","seminar","senior","sense","sentence","series","service","session","settle","setup","seven","shadow","shaft","shallow","share","shed","shell","sheriff","shield","shift","shine","ship","shiver","shock","shoe","shoot","shop","short","shoulder","shove","shrimp","shrug","shuffle","shy","sibling","sick","side","siege","sight","sign","silent","silk","silly","silver","similar","simple","since","sing","siren","sister","situate","six","size","skate","sketch","ski","skill","skin","skirt","skull","slab","slam","sleep","slender","slice","slide","slight","slim","slogan","slot","slow","slush","small","smart","smile","smoke","smooth","snack","snake","snap","sniff","snow","soap","soccer","social","sock","soda","soft","solar","soldier","solid","solution","solve","someone","song","soon","sorry","sort","soul","sound","soup","source","south","space","spare","spatial","spawn","speak","special","speed","spell","spend","sphere","spice","spider","spike","spin","spirit","split","spoil","sponsor","spoon","sport","spot","spray","spread","spring","spy","square","squeeze","squirrel","stable","stadium","staff","stage","stairs","stamp","stand","start","state","stay","steak","steel","stem","step","stereo","stick","still","sting","stock","stomach","stone","stool","story","stove","strategy","street","strike","strong","struggle","student","stuff","stumble","style","subject","submit","subway","success","such","sudden","suffer","sugar","suggest","suit","summer","sun","sunny","sunset","super","supply","supreme","sure","surface","surge","surprise","surround","survey","suspect","sustain","swallow","swamp","swap","swarm","swear","sweet","swift","swim","swing","switch","sword","symbol","symptom","syrup","system","table","tackle","tag","tail","talent","talk","tank","tape","target","task","taste","tattoo","taxi","teach","team","tell","ten","tenant","tennis","tent","term","test","text","thank","that","theme","then","theory","there","they","thing","this","thought","three","thrive","throw","thumb","thunder","ticket","tide","tiger","tilt","timber","time","tiny","tip","tired","tissue","title","toast","tobacco","today","toddler","toe","together","toilet","token","tomato","tomorrow","tone","tongue","tonight","tool","tooth","top","topic","topple","torch","tornado","tortoise","toss","total","tourist","toward","tower","town","toy","track","trade","traffic","tragic","train","transfer","trap","trash","travel","tray","treat","tree","trend","trial","tribe","trick","trigger","trim","trip","trophy","trouble","truck","true","truly","trumpet","trust","truth","try","tube","tuition","tumble","tuna","tunnel","turkey","turn","turtle","twelve","twenty","twice","twin","twist","two","type","typical","ugly","umbrella","unable","unaware","uncle","uncover","under","undo","unfair","unfold","unhappy","uniform","unique","unit","universe","unknown","unlock","until","unusual","unveil","update","upgrade","uphold","upon","upper","upset","urban","urge","usage","use","used","useful","useless","usual","utility","vacant","vacuum","vague","valid","valley","valve","van","vanish","vapor","various","vast","vault","vehicle","velvet","vendor","venture","venue","verb","verify","version","very","vessel","veteran","viable","vibrant","vicious","victory","video","view","village","vintage","violin","virtual","virus","visa","visit","visual","vital","vivid","vocal","voice","void","volcano","volume","vote","voyage","wage","wagon","wait","walk","wall","walnut","want","warfare","warm","warrior","wash","wasp","waste","water","wave","way","wealth","weapon","wear","weasel","weather","web","wedding","weekend","weird","welcome","west","wet","whale","what","wheat","wheel","when","where","whip","whisper","wide","width","wife","wild","will","win","window","wine","wing","wink","winner","winter","wire","wisdom","wise","wish","witness","wolf","woman","wonder","wood","wool","word","work","world","worry","worth","wrap","wreck","wrestle","wrist","write","wrong","yard","year","yellow","you","young","youth","zebra","zero","zone","zoo"];</script>
+<script>/*
+ * Tetrapolar Key Recovery Tool — crypto/validation core.
+ * Shared verbatim between the HTML page (browser) and the test harness (node).
+ * Exposes global `TetrapolarCore`. No DOM access, no network, no storage.
+ *
+ * Layers, top to bottom:
+ *   1. encoding helpers (base64, bits)
+ *   2. envelope extraction & validation (spec §2.2)
+ *   3. client-authoritative conventions: AAD, BIP39 payload
+ *   4. decryption pipeline (spec §3, client conventions)
+ *   5. dependency wiring shared by the page and the test harness
+ */
+(function (root) {
+  'use strict';
+
+  // ---- Error codes mapped to spec §6 messages ---------------------------------
+  var MESSAGES = {
+    NOT_BACKUP: "This doesn't look like a Tetrapolar backup file.",
+    UNSUPPORTED_FORMAT: 'Unsupported backup format.',
+    UNSUPPORTED_METHOD: 'This backup uses an unsupported encryption method.',
+    INVALID_PARAMS: 'This backup has invalid encryption parameters.',
+    AUTH_FAILED: 'Incorrect password or corrupted backup.',
+    OOM: 'Not enough memory to decrypt on this device. Try a desktop browser.'
+  };
+
+  function fail(code) {
+    var e = new Error(MESSAGES[code]);
+    e.code = code;
+    throw e;
+  }
+
+  function zeroize(u8) {
+    if (u8 && u8.fill) u8.fill(0);
+  }
+
+  // ---- 1. Encoding helpers ------------------------------------------------------
+  function b64Decode(s) {
+    if (typeof s !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(s) || s.length % 4 !== 0) {
+      return null;
+    }
+    if (typeof atob === 'function') {
+      var bin;
+      try { bin = atob(s); } catch (e) { return null; }
+      var out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    // node fallback (test harness / vector generation)
+    try { return new Uint8Array(Buffer.from(s, 'base64')); } catch (e) { return null; }
+  }
+
+  function bytesToBits(u8) {
+    var s = '';
+    for (var i = 0; i < u8.length; i++) s += ('0000000' + u8[i].toString(2)).slice(-8);
+    return s;
+  }
+
+  async function sha256(bytes) {
+    return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  }
+
+  // ---- 2. Envelope extraction & validation (§2.2) -------------------------------
+  function extractEnvelope(parsed) {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail('NOT_BACKUP');
+    if (parsed.envelope && typeof parsed.envelope === 'object') return parsed.envelope;
+    return parsed;
+  }
+
+  function isIntIn(v, lo, hi) {
+    return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v >= lo && v <= hi;
+  }
+
+  function validateEnvelope(env) {
+    if (!env || typeof env !== 'object' || Array.isArray(env)) fail('NOT_BACKUP');
+    if (env.format !== 'tetrapolar-encrypted-key' || env.version !== 1) {
+      fail('UNSUPPORTED_FORMAT');
+    }
+    var enc = env.encryption;
+    if (!enc || typeof enc !== 'object') fail('NOT_BACKUP');
+    var kdf = enc.kdf, cipher = enc.cipher;
+    if (!kdf || typeof kdf !== 'object' || !cipher || typeof cipher !== 'object') {
+      fail('INVALID_PARAMS');
+    }
+    if (kdf.name !== 'argon2id') fail('UNSUPPORTED_METHOD');
+    if (cipher.name !== 'xchacha20-poly1305' && cipher.name !== 'aes-256-gcm') {
+      fail('UNSUPPORTED_METHOD');
+    }
+    // §2.2 parameter bounds
+    if (!isIntIn(kdf.memory_kib, 65536, 262144)) fail('INVALID_PARAMS');
+    if (!isIntIn(kdf.iterations, 2, 10)) fail('INVALID_PARAMS');
+    if (!isIntIn(kdf.parallelism, 1, 4)) fail('INVALID_PARAMS');
+    var salt = b64Decode(kdf.salt);
+    if (!salt || salt.length < 16 || salt.length > 64) fail('INVALID_PARAMS');
+    var wantNonce = cipher.name === 'xchacha20-poly1305' ? 24 : 12;
+    var nonce = b64Decode(cipher.nonce);
+    if (!nonce || nonce.length !== wantNonce) fail('INVALID_PARAMS');
+    if (typeof enc.ciphertext !== 'string' || enc.ciphertext.length === 0 ||
+        enc.ciphertext.length > 40960) fail('INVALID_PARAMS');
+    var ciphertext = b64Decode(enc.ciphertext);
+    if (!ciphertext || ciphertext.length === 0) fail('INVALID_PARAMS');
+    return { salt: salt, nonce: nonce, ciphertext: ciphertext, kdf: kdf, cipher: cipher };
+  }
+
+  function parseBackup(jsonText) {
+    var parsed;
+    try { parsed = JSON.parse(jsonText); } catch (e) { fail('NOT_BACKUP'); }
+    var env = extractEnvelope(parsed);
+    var v = validateEnvelope(env);
+    return { envelope: env, decoded: v };
+  }
+
+  // ---- 3. Client-authoritative conventions ---------------------------------------
+  // AAD: the client authenticates this exact JSON, UTF-8 encoded, fixed key
+  // order, no extra whitespace. Salt/nonce/ciphertext are excluded by design.
+  function buildAad(env) {
+    var enc = env.encryption, meta = env.public_metadata || {};
+    if (meta.master_fingerprint == null || meta.word_count == null ||
+        env.backup_id == null || env.created_at == null) {
+      fail('INVALID_PARAMS'); // AAD cannot be reconstructed without these fields
+    }
+    var json = '{"format":"' + env.format + '","version":' + env.version +
+      ',"backup_id":"' + env.backup_id + '","created_at":"' + env.created_at +
+      '","master_fingerprint":"' + meta.master_fingerprint +
+      '","word_count":' + meta.word_count +
+      ',"kdf":{"name":"' + enc.kdf.name + '","memory_kib":' + enc.kdf.memory_kib +
+      ',"iterations":' + enc.kdf.iterations + ',"parallelism":' + enc.kdf.parallelism +
+      '},"cipher":"' + enc.cipher.name + '"}';
+    return new TextEncoder().encode(json);
+  }
+
+  // BIP39 entropy <-> mnemonic (English wordlist)
+  var ENTROPY_LENGTHS = [16, 20, 24, 28, 32]; // 128–256 bits
+
+  async function entropyToMnemonic(entropy, wordlist) {
+    if (ENTROPY_LENGTHS.indexOf(entropy.length) === -1) return null;
+    var csLen = entropy.length / 4; // checksum bits
+    var bits = bytesToBits(entropy) + bytesToBits(await sha256(entropy)).slice(0, csLen);
+    var words = [];
+    for (var i = 0; i < bits.length; i += 11) {
+      words.push(wordlist[parseInt(bits.slice(i, i + 11), 2)]);
+    }
+    return words.join(' ');
+  }
+
+  // Inverse of entropyToMnemonic; throws on unknown words or a bad checksum.
+  // Used by the test-vector generator.
+  async function mnemonicToEntropy(mnemonic, wordlist) {
+    var index = {};
+    for (var i = 0; i < wordlist.length; i++) index[wordlist[i]] = i;
+    var words = mnemonic.trim().split(/\s+/), bits = '';
+    for (var j = 0; j < words.length; j++) {
+      if (!(words[j] in index)) throw new Error('word not in BIP39 list: ' + words[j]);
+      bits += ('0000000000' + index[words[j]].toString(2)).slice(-11);
+    }
+    var entLen = Math.floor(bits.length / 33) * 32;
+    if (ENTROPY_LENGTHS.indexOf(entLen / 8) === -1) throw new Error('invalid mnemonic length');
+    var entBits = bits.slice(0, entLen), csBits = bits.slice(entLen);
+    var entropy = new Uint8Array(entLen / 8);
+    for (var k = 0; k < entropy.length; k++) entropy[k] = parseInt(entBits.slice(k * 8, k * 8 + 8), 2);
+    if (bytesToBits(await sha256(entropy)).slice(0, csBits.length) !== csBits) {
+      throw new Error('mnemonic checksum mismatch');
+    }
+    return entropy;
+  }
+
+  // Plaintext payload: the client encrypts a JSON payload, not a bare mnemonic:
+  //   {"payload_type":"bip39-entropy","payload_version":1,"entropy":"<base64>",...}
+  // Falls back to treating the plaintext as a raw mnemonic if it isn't that JSON.
+  async function payloadToSeed(plaintextBytes, wordlist) {
+    var text = new TextDecoder('utf-8', { fatal: false }).decode(plaintextBytes);
+    try {
+      var p = JSON.parse(text);
+      if (p && p.payload_type === 'bip39-entropy' && typeof p.entropy === 'string') {
+        var entropy = b64Decode(p.entropy);
+        if (!entropy) return { seed: text, warning: 'payload entropy is not valid base64' };
+        var mnemonic = await entropyToMnemonic(entropy, wordlist);
+        if (!mnemonic) return { seed: text, warning: 'payload entropy has an invalid length' };
+        return { seed: mnemonic, warning: null };
+      }
+      return { seed: text, warning: 'unrecognized payload type' };
+    } catch (e) {
+      return { seed: text, warning: null }; // raw mnemonic plaintext
+    }
+  }
+
+  // ---- 4. Decryption pipeline (§3, client conventions) ---------------------------
+  // deps: { argon2id(opts) -> Promise<Uint8Array>,
+  //         xchachaDecryptAad(key, nonce, ct, aad) -> Uint8Array,
+  //         wordlist: string[] }
+  // AES-256-GCM uses WebCrypto (crypto.subtle) directly.
+  async function decryptEnvelope(envelope, password, deps) {
+    var v = validateEnvelope(envelope); // caller has usually validated already; cheap
+    var aad = buildAad(envelope);
+
+    // §3.1: NFC-normalized UTF-8, no trimming, no lowercasing
+    var passwordBytes = new TextEncoder().encode(password.normalize('NFC'));
+
+    // §3.2: Argon2id, envelope params, 32-byte output used directly as AEAD key
+    var key;
+    try {
+      key = await deps.argon2id({
+        pass: passwordBytes,
+        salt: v.salt,
+        mem: v.kdf.memory_kib,
+        time: v.kdf.iterations,
+        parallelism: v.kdf.parallelism,
+        hashLen: 32
+      });
+    } catch (e) {
+      zeroize(passwordBytes);
+      fail('OOM'); // Argon2 failures on constrained devices are almost always memory
+    }
+    zeroize(passwordBytes);
+
+    // AEAD open: client-convention AAD, 16-byte tag appended to ciphertext.
+    var plain, result;
+    try {
+      if (v.cipher.name === 'xchacha20-poly1305') {
+        plain = deps.xchachaDecryptAad(key, v.nonce, v.ciphertext, aad);
+      } else {
+        var ck = await crypto.subtle.importKey('raw', key, { name: 'AES-GCM' }, false, ['decrypt']);
+        var buf = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: v.nonce, tagLength: 128, additionalData: aad }, ck, v.ciphertext);
+        plain = new Uint8Array(buf);
+      }
+    } catch (e) {
+      zeroize(key);
+      fail('AUTH_FAILED'); // §4.4: never distinguish wrong password vs corrupt data
+    }
+
+    try {
+      result = await payloadToSeed(plain, deps.wordlist);
+    } finally {
+      zeroize(key);
+      zeroize(plain);
+    }
+    return result;
+  }
+
+  // ---- 5. Dependency wiring (shared by the page and the test harness) ------------
+  // Binds the vendored libraries to the deps interface decryptEnvelope expects.
+  //   argon2Lib: argon2-browser global (`argon2`)
+  //   xchacha20poly1305: @noble/ciphers constructor
+  //   wordlist: BIP39 English words
+  function createDeps(argon2Lib, xchacha20poly1305, wordlist) {
+    return {
+      argon2id: function (opts) {
+        return argon2Lib.hash({
+          pass: opts.pass,
+          salt: opts.salt,
+          time: opts.time,
+          mem: opts.mem,
+          parallelism: opts.parallelism,
+          hashLen: opts.hashLen,
+          type: argon2Lib.ArgonType.Argon2id
+        }).then(function (r) { return r.hash; });
+      },
+      xchachaDecryptAad: function (key, nonce, ct, aad) {
+        return xchacha20poly1305(key, nonce, aad).decrypt(ct);
+      },
+      wordlist: wordlist
+    };
+  }
+
+  root.TetrapolarCore = {
+    MESSAGES: MESSAGES,
+    parseBackup: parseBackup,
+    validateEnvelope: validateEnvelope,
+    decryptEnvelope: decryptEnvelope,
+    buildAad: buildAad,
+    payloadToSeed: payloadToSeed,
+    entropyToMnemonic: entropyToMnemonic,
+    mnemonicToEntropy: mnemonicToEntropy,
+    createDeps: createDeps,
+    zeroize: zeroize,
+    b64Decode: b64Decode
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>/*
+ * Tetrapolar Key Recovery Tool — page UI.
+ * All DOM interaction lives here; all crypto/validation lives in core.js
+ * (window.TetrapolarCore). Inlined into template.html by build.js.
+ */
+(function () {
+  'use strict';
+  var Core = window.TetrapolarCore;
+
+  // Crypto deps: vendored globals bound to the interface core.js expects.
+  var deps = Core.createDeps(argon2, NobleCiphers.xchacha20poly1305, window.BIP39_WORDLIST);
+
+  // ---- DOM ----------------------------------------------------------------------
+  var $ = function (id) { return document.getElementById(id); };
+  var dropzone = $('dropzone'), fileInput = $('file-input');
+  var fileMeta = $('file-meta'), fileError = $('file-error');
+  var password = $('password'), togglePw = $('toggle-pw'), decryptBtn = $('decrypt');
+  var progress = $('progress'), decryptError = $('decrypt-error');
+  var stepResult = $('step-result'), revealBtn = $('reveal'), revealRow = $('reveal-row');
+  var seedArea = $('seed-area'), seedGrid = $('seed-grid'), copyBtn = $('copy');
+  var clearBtn = $('clear'), wordWarning = $('word-warning');
+
+  // ---- State (never persisted, never logged) ------------------------------------
+  var currentEnvelope = null;
+  var seedText = null;      // held only in memory; cleared on reset
+  var payloadWarning = null;
+
+  function showMessage(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
+  function hideMessage(el) { el.classList.add('hidden'); el.textContent = ''; }
+
+  function setPasswordEnabled(on) {
+    password.disabled = !on; togglePw.disabled = !on; decryptBtn.disabled = !on;
+    if (on) password.focus();
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // Preflight: if the browser blocks WebAssembly (strict CSP, extensions),
+  // Argon2 would hang forever — fail fast with a clear message instead.
+  var wasmOK = (function () {
+    try {
+      return typeof WebAssembly === 'object' &&
+        WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+    } catch (e) { return false; }
+  })();
+
+  // ---- Banner ---------------------------------------------------------------------
+  $('banner-close').addEventListener('click', function () { $('banner').classList.add('hidden'); });
+
+  // ---- Step 1: file -----------------------------------------------------------------
+  dropzone.addEventListener('click', function () { fileInput.click(); });
+  dropzone.addEventListener('dragover', function (e) { e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', function () { dropzone.classList.remove('drag'); });
+  dropzone.addEventListener('drop', function (e) {
+    e.preventDefault(); dropzone.classList.remove('drag');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', function () {
+    if (fileInput.files && fileInput.files[0]) readFile(fileInput.files[0]);
+  });
+
+  function readFile(file) {
+    hideMessage(fileError);
+    var reader = new FileReader();
+    reader.onload = function () { onFileParsed(String(reader.result)); };
+    reader.onerror = function () { showMessage(fileError, Core.MESSAGES.NOT_BACKUP); };
+    reader.readAsText(file);
+  }
+
+  function onFileParsed(text) {
+    try {
+      var res = Core.parseBackup(text);
+      currentEnvelope = res.envelope;
+      renderMetadata(res.envelope);
+      fileMeta.classList.remove('hidden');
+      setPasswordEnabled(true);
+    } catch (e) {
+      currentEnvelope = null;
+      fileMeta.classList.add('hidden');
+      setPasswordEnabled(false);
+      showMessage(fileError, (e && e.code && Core.MESSAGES[e.code]) || Core.MESSAGES.NOT_BACKUP);
+    }
+  }
+
+  function renderMetadata(env) {
+    var meta = env.public_metadata || {};
+    var kdf = env.encryption.kdf;
+    var parts = [];
+    if (env.created_at) parts.push('<b>Created:</b> ' + escapeHtml(env.created_at));
+    if (meta.master_fingerprint) parts.push('<b>Fingerprint:</b> ' + escapeHtml(meta.master_fingerprint));
+    parts.push('<b>Cipher:</b> ' + escapeHtml(env.encryption.cipher.name));
+    parts.push('<b>KDF:</b> argon2id · ' + kdf.memory_kib / 1024 + ' MiB · ' +
+      kdf.iterations + ' iterations · parallelism ' + kdf.parallelism);
+    fileMeta.innerHTML = parts.join('<br>');
+  }
+
+  // ---- Step 2/3: password & decrypt -------------------------------------------------
+  togglePw.addEventListener('click', function () {
+    var show = password.type === 'password';
+    password.type = show ? 'text' : 'password';
+    togglePw.textContent = show ? 'Hide' : 'Show';
+  });
+
+  decryptBtn.addEventListener('click', function () {
+    if (!currentEnvelope) return;
+    hideMessage(decryptError);
+    if (!wasmOK) {
+      showMessage(decryptError, 'Your browser is blocking WebAssembly, which this tool needs to derive the key. Try a different browser or check for strict security extensions.');
+      return;
+    }
+    decryptBtn.disabled = true;
+    progress.classList.remove('hidden');
+    var pw = password.value;
+    // Let the progress state paint before the blocking KDF starts.
+    setTimeout(function () {
+      Core.decryptEnvelope(currentEnvelope, pw, deps).then(function (result) {
+        seedText = result.seed;
+        payloadWarning = result.warning || null;
+        password.value = '';
+        progress.classList.add('hidden');
+        showResult();
+      }).catch(function (e) {
+        progress.classList.add('hidden');
+        decryptBtn.disabled = false;
+        showMessage(decryptError, (e && e.code && Core.MESSAGES[e.code]) || Core.MESSAGES.AUTH_FAILED);
+      });
+    }, 50);
+  });
+
+  // ---- Step 5: reveal -----------------------------------------------------------------
+  function showResult() {
+    var warnings = [];
+    if (payloadWarning) {
+      warnings.push('Note: ' + payloadWarning + ' — showing the decrypted content as-is.');
+    }
+    var wordWarningText = checkWordCount(seedText, currentEnvelope.public_metadata || {});
+    if (wordWarningText) warnings.push(wordWarningText);
+    if (warnings.length) {
+      showMessage(wordWarning, warnings.join(' '));
+    } else {
+      hideMessage(wordWarning);
+    }
+    stepResult.classList.remove('hidden');
+    stepResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // Sanity check only (spec §3.5): BIP39 phrases are 12/15/18/21/24 words and
+  // should match the metadata word_count. Returns a warning string or null.
+  function checkWordCount(seed, meta) {
+    var count = seed.trim().split(/\s+/).length;
+    var validCounts = { 12: 1, 15: 1, 18: 1, 21: 1, 24: 1 };
+    if (validCounts[count] && (!meta.word_count || meta.word_count === count)) return null;
+    return 'Warning: expected ' + (meta.word_count || '12/15/18/21/24') +
+      ' words but found ' + count + '. The content below may be malformed — verify it carefully.';
+  }
+
+  revealBtn.addEventListener('click', function () {
+    var words = seedText.trim().split(/\s+/);
+    seedGrid.innerHTML = '';
+    words.forEach(function (w, i) {
+      var span = document.createElement('span');
+      var num = document.createElement('i');
+      num.textContent = (i + 1) + '.';
+      span.appendChild(num);
+      span.appendChild(document.createTextNode(w));
+      seedGrid.appendChild(span);
+    });
+    revealRow.classList.add('hidden');
+    seedArea.classList.remove('hidden');
+  });
+
+  copyBtn.addEventListener('click', function () {
+    var done = function () { copyBtn.textContent = 'Copied'; setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(seedText.trim()).then(done, done);
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = seedText.trim();
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta); done();
+    }
+  });
+
+  // ---- Step 6: clear / zeroize --------------------------------------------------------
+  function resetAll() {
+    seedText = null;
+    payloadWarning = null;
+    currentEnvelope = null;
+    password.value = '';
+    seedGrid.innerHTML = '';
+    seedArea.classList.add('hidden');
+    revealRow.classList.remove('hidden');
+    stepResult.classList.add('hidden');
+    fileMeta.classList.add('hidden'); fileMeta.innerHTML = '';
+    hideMessage(fileError); hideMessage(decryptError); hideMessage(wordWarning);
+    fileInput.value = '';
+    setPasswordEnabled(false);
+    progress.classList.add('hidden');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText('').catch(function () {});
+    }
+    window.scrollTo(0, 0);
+  }
+
+  clearBtn.addEventListener('click', resetAll);
+  window.addEventListener('beforeunload', resetAll);
+  window.addEventListener('pagehide', resetAll);
+})();
+</script>
+</body>
+</html>
